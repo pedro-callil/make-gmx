@@ -26,9 +26,11 @@ PKSRC	= to-packmol.inp
 MINSRC	= Minimization.mdp
 EQUISRC	= Equilibration.mdp
 PRODSRC	= Production.mdp
-TOPSRC	= topol.top
+FDIR	= ff
+PDIR	= molecules
 
 # Output files
+TOPOUT	= topol.top
 PKOUT	= from-packmol
 EDITOUT	= from-editconf
 MINOUT	= from-minimization
@@ -45,7 +47,20 @@ export ROC_ENABLE_PRE_VEGA=1
 #                                                                              #
 ################################################################################
 
-ITPS	= $(shell cat $(TOPSRC) |grep ^\#include |sed 's/^\#include//g;s/\"//g')
+ITPS	= $(shell for molecule in $$(cat $(PKSRC) $\
+	  			| grep ^structure $\
+				| cut -d ' ' -f 2 $\
+				); do $\
+			export ITP=$$(grep $$(cat $$molecule $\
+					| grep "\(^ATOM\|^HETATM\)" -m 1 $\
+					| cut -c 18-20 $\
+					) $(FDIR)/* -l $\
+				); $\
+			echo $$ITP; $\
+		done $\
+			| tr ' ' '\n' $\
+			| sort $\
+			| uniq)
 PDBS	= $(shell cat $(PKSRC) |grep ^structure |sed 's/^structure\ //g')
 
 SRC	= $(PKSRC) $(MINSRC) $(EQUISRC) $(PRODSRC) $(TOPSRC)
@@ -54,24 +69,39 @@ NDXSTR  = $$(cat $(EQUISRC) |grep ^tc-grps |tr '[:blank:]' '\n' \
 		|grep '_' \
 		|sed 's/^/\"/g;s/$$/\"\\nq/g;s/_/\"\ |\ \"/g')
 
-BOXX	= $$(cat $(PKSRC) |grep box |tr -d '[A-Za-z]' \
-	  	|tr -s '[:blank:]' '-' \
-		|cut -d '-' -f 1,2,5 \
-		|sed 's/^-/-(/g;s/$$/)\/9.5/' \
-		|bc -l |cut -c -8 \
-		| awk '{if($$1>max) {max=$$1}} END {print max}')
-BOXY	= $$(cat $(PKSRC) |grep box |tr -d '[A-Za-z]' \
-	  	|tr -s '[:blank:]' '-' \
-		|cut -d '-' -f 1,3,6 \
-		|sed 's/^-/-(/g;s/$$/)\/9.5/' \
-		|bc -l |cut -c -8 \
-		|awk '{if($$1>max) {max=$$1}} END {print max}')
-BOXZ	= $$(cat $(PKSRC) |grep box |tr -d '[A-Za-z]' \
-	  	|tr -s '[:blank:]' '-' \
-		|cut -d '-' -f 1,4,7 \
-		|sed 's/^-/-(/g;s/$$/)\/9.5/' \
-		|bc -l |cut -c -8 \
-		|awk '{if($$1>max) {max=$$1}} END {print max}')
+BOXZ	= $$(cat $(PKSRC) \
+	  		| grep box \
+			| tr -d '[A-Za-z]' \
+			| tr -s '[:blank:]' ' ' \
+			| sed 's/^ //;s/\ \+/,/g' \
+			| cut -d ',' -f 1,4 \
+			| datamash -t ',' max 2 min 1 --output-delimiter '-' \
+			| bc -l \
+			| sed 's/$$/\/9.5/g' \
+			| bc -l \
+			| cut -c -5)
+BOXZ	= $$(cat $(PKSRC) \
+	  		| grep box \
+			| tr -d '[A-Za-z]' \
+			| tr -s '[:blank:]' ' ' \
+			| sed 's/^ //;s/\ \+/,/g' \
+			| cut -d ',' -f 2,5 \
+			| datamash -t ',' max 2 min 1 --output-delimiter '-' \
+			| bc -l \
+			| sed 's/$$/\/9.5/g' \
+			| bc -l \
+			| cut -c -5)
+BOXZ	= $$(cat $(PKSRC) \
+	  		| grep box \
+			| tr -d '[A-Za-z]' \
+			| tr -s '[:blank:]' ' ' \
+			| sed 's/^ //;s/\ \+/,/g' \
+			| cut -d ',' -f 3,6 \
+			| datamash -t ',' max 2 min 1 --output-delimiter '-' \
+			| bc -l \
+			| sed 's/$$/\/9.5/g' \
+			| bc -l \
+			| cut -c -5)
 BOXTYPE	= triclinic
 
 .PHONY: all clean
@@ -84,7 +114,7 @@ clean:
 $(PRODOUT).gro: $(PRODSRC) $(ITPS) $(EQUIOUT).gro $(NDXOUT).ndx
 	gmx grompp -f $(PRODSRC) \
 		-c $(EQUIOUT).gro \
-		-p $(TOPSRC) \
+		-p $(TOPOUT) \
 		-o $(PRODOUT).tpr \
 		-n $(NDXOUT).ndx
 	gmx mdrun -deffnm $(PRODOUT) -v
@@ -95,7 +125,7 @@ $(PRODOUT).gro: $(PRODSRC) $(ITPS) $(EQUIOUT).gro $(NDXOUT).ndx
 	sed 's/;energygrps/energygrps/g' $(PRODSRC).bak > $(PRODSRC)
 	gmx grompp -f $(PRODSRC) \
 		-c $(MINOUT).gro \
-		-p $(TOPSRC) \
+		-p $(TOPOUT) \
 		-o $(PRODOUT).tpr \
 		-n $(NDXOUT).ndx
 	gmx mdrun -deffnm $(PRODOUT) -v \
@@ -106,7 +136,7 @@ $(PRODOUT).gro: $(PRODSRC) $(ITPS) $(EQUIOUT).gro $(NDXOUT).ndx
 $(EQUIOUT).gro: $(EQUISRC) $(ITPS) $(MINOUT).gro $(NDXOUT).ndx
 	gmx grompp -f $(EQUISRC) \
 		-c $(MINOUT).gro \
-		-p $(TOPSRC) \
+		-p $(TOPOUT) \
 		-o $(EQUIOUT).tpr \
 		-n $(NDXOUT).ndx \
 		-maxwarn 1
@@ -118,7 +148,7 @@ $(EQUIOUT).gro: $(EQUISRC) $(ITPS) $(MINOUT).gro $(NDXOUT).ndx
 	sed 's/;energygrps/energygrps/g' $(EQUISRC).bak > $(EQUISRC)
 	gmx grompp -f $(EQUISRC) \
 		-c $(MINOUT).gro \
-		-p $(TOPSRC) \
+		-p $(TOPOUT) \
 		-o $(EQUIOUT).tpr \
 		-n $(NDXOUT).ndx \
 		-maxwarn 1
@@ -130,7 +160,7 @@ $(EQUIOUT).gro: $(EQUISRC) $(ITPS) $(MINOUT).gro $(NDXOUT).ndx
 $(MINOUT).gro: $(MINSRC) $(ITPS) $(EDITOUT).gro
 	gmx grompp -f $(MINSRC) \
 		-c $(EDITOUT).gro \
-		-p $(TOPSRC) \
+		-p $(TOPOUT) \
 		-o $(MINOUT).tpr
 	gmx mdrun -deffnm $(MINOUT) -v
 
@@ -147,5 +177,31 @@ $(EDITOUT).gro: $(PKOUT).pdb
 $(PKOUT).pdb: $(PKSRC) $(PDBS)
 	packmol < $(PKSRC)
 
-
-
+$(TOPOUT): $(PKSRC) $(PDBS) $(ITPS)
+	export ITPLIST=$$(for molecule in $$(grep ^structure $(PKSRC) $\
+			| cut -d ' ' -f 2); \
+			do \
+				export ITP=$$(grep $$(cat $$molecule $\
+					| grep "\(^ATOM\|^HETATM\)" -m 1 $\
+					| cut -c 18-20) $\
+				ff/* -l);\
+				echo $$ITP; \
+			done | tr ' ' '\n' \
+				| sort \
+				| uniq \
+				| sed "s/^/\#include \"/;s/\.itp/.itp\"/"); \
+	echo "$$ITPLIST" > $(TOPOUT)
+	echo "" >> $(TOPOUT)
+	echo "[ system ]" >> $(TOPOUT)
+	echo "NEW SIMULATION" >> $(TOPOUT)
+	echo "" >> $(TOPOUT)
+	echo "[ molecules ]" >> $(TOPOUT)
+	export MOLECULES=$$(for molecule in $(shell grep ^structure $(PKSRC) $\
+			| cut -d ' ' -f 2); \
+		do \
+			cat $$molecule \
+				| grep "\(^ATOM\|^HETATM\)" -m 1 \
+				| cut -c 18-21 | tr -d ' '; \
+		done); \
+	export NUMBERS=$$(grep number $(PKSRC) | tr -cd '[0-9]\n'); \
+	paste <(echo "$$MOLECULES") <(echo "$$NUMBERS") -d ' ' >> $(TOPOUT)
